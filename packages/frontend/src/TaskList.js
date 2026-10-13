@@ -1,19 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
-  List, ListItem, ListItemText, IconButton, Checkbox, Typography, Box, CircularProgress, Paper, Chip
+  List, ListItem, ListItemText, IconButton, Checkbox, Typography, Box, Paper, Chip
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import EventIcon from '@mui/icons-material/Event';
+import PriorityControl from './PriorityControl';
 
-function TaskList({ onEdit }) {
-  const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    fetchTasks();
-  }, []);
+function TaskList({ tasks, onEdit, onUpdate, onDelete }) {
+  const sortedTasks = [...tasks].sort((a, b) => {
+    if (!a.due_date && b.due_date) return 1;
+    if (a.due_date && !b.due_date) return -1;
+    return (a.due_date || '').localeCompare(b.due_date || '') ||
+      (a.created_at || '').localeCompare(b.created_at || '');
+  });
 
   const formatDueDate = (dateString) => {
     if (!dateString) return null;
@@ -26,50 +26,6 @@ function TaskList({ onEdit }) {
       day: 'numeric' 
     });
   };
-
-  const fetchTasks = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch('/api/tasks');
-      if (!response.ok) throw new Error('Failed to fetch tasks');
-      const data = await response.json();
-      setTasks(data);
-      setError(null);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleToggleComplete = async (task) => {
-    try {
-      await fetch(`/api/tasks/${task.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ completed: !task.completed })
-      });
-      fetchTasks();
-    } catch (err) {
-      setError('Failed to update task');
-    }
-  };
-
-  const handleDelete = async (id) => {
-    try {
-      await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
-      fetchTasks();
-    } catch (err) {
-      setError('Failed to delete task');
-    }
-  };
-
-  if (loading) return (
-    <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
-      <CircularProgress sx={{ color: '#1976d2' }} />
-    </Box>
-  );
-  if (error) return <Typography color="error" sx={{ fontWeight: 500 }}>{error}</Typography>;
 
   return (
     <Paper 
@@ -123,11 +79,12 @@ function TaskList({ onEdit }) {
             <Typography variant="body2">No tasks found.</Typography>
           </Box>
         )}
-        {tasks.map((task, index) => (
+        {sortedTasks.map(task => (
           <ListItem 
             key={task.id} 
             sx={{ 
-              pr: 18,
+              flexWrap: 'wrap',
+              gap: 1,
               py: 1,
               mb: 1,
               borderRadius: 2,
@@ -151,7 +108,7 @@ function TaskList({ onEdit }) {
             <Checkbox
               edge="start"
               checked={!!task.completed}
-              onChange={() => handleToggleComplete(task)}
+              onChange={() => onUpdate(task.id, { completed: !task.completed })}
               inputProps={{ 'aria-label': 'Mark task complete' }}
               size="small"
               sx={{
@@ -193,16 +150,18 @@ function TaskList({ onEdit }) {
             />
             <Box 
               sx={{ 
-                position: 'absolute', 
-                right: 8,
-                top: '50%',
-                transform: 'translateY(-50%)',
                 display: 'flex',
+                flexWrap: 'wrap',
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 1
               }}
             >
+              <PriorityControl
+                value={task.priority}
+                onChange={priority => onUpdate(task.id, { priority })}
+                label={`Priority for ${task.title}`}
+              />
               {task.due_date && (
                 <Chip
                   icon={<EventIcon sx={{ fontSize: 14 }} />}
@@ -246,7 +205,7 @@ function TaskList({ onEdit }) {
                 </IconButton>
                 <IconButton 
                   aria-label="delete" 
-                  onClick={() => handleDelete(task.id)}
+                  onClick={() => onDelete(task.id)}
                   size="small"
                   sx={{
                     color: '#f44336',

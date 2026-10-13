@@ -2,11 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { TextField, Button, Paper, Typography, Box } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import SaveIcon from '@mui/icons-material/Save';
+import PriorityControl from './PriorityControl';
 
 function TaskForm({ onSave, initialTask }) {
   const [title, setTitle] = useState(initialTask?.title || '');
   const [description, setDescription] = useState(initialTask?.description || '');
   const [dueDate, setDueDate] = useState(initialTask?.due_date || '');
+  const [priority, setPriority] = useState(initialTask?.priority || 'P3');
   const [error, setError] = useState(null);
 
   // Helper to normalize date string to YYYY-MM-DD format
@@ -30,10 +32,12 @@ function TaskForm({ onSave, initialTask }) {
       setTitle(initialTask.title || '');
       setDescription(initialTask.description || '');
       setDueDate(normalizeDateString(initialTask.due_date));
+      setPriority(initialTask.priority || 'P3');
     } else {
       setTitle('');
       setDescription('');
       setDueDate('');
+      setPriority('P3');
     }
   }, [initialTask]);
 
@@ -44,10 +48,16 @@ function TaskForm({ onSave, initialTask }) {
       return;
     }
     setError(null);
-    await onSave({ title, description, due_date: dueDate });
+    try {
+      await onSave({ title, description, due_date: dueDate, priority });
+    } catch (err) {
+      setError(`Failed to save task: ${err.message}`);
+      return;
+    }
     setTitle('');
     setDescription('');
     setDueDate('');
+    setPriority('P3');
   };
 
   return (
@@ -143,7 +153,11 @@ function TaskForm({ onSave, initialTask }) {
             }
           }}
         />
-        {error && <Typography color="error" sx={{ fontWeight: 500, fontSize: '0.875rem' }}>{error}</Typography>}
+        <Box>
+          <Typography variant="body2" sx={{ mb: 0.5 }}>Priority</Typography>
+          <PriorityControl value={priority} onChange={setPriority} label="Task priority" />
+        </Box>
+        {error && <Typography role="alert" color="error" sx={{ fontWeight: 500, fontSize: '0.875rem' }}>{error}</Typography>}
         <Box display="flex" gap={2}>
           <Button 
             type="submit" 
