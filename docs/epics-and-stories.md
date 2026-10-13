@@ -1,0 +1,117 @@
+# MVP
+
+- Epic: Task Details
+  - Story: Preserve task titles and completion state
+    - Acceptance Criteria:
+      - Tasks continue to have a title and completion state.
+      - Editing a task's due date or priority does not change its title or completion state.
+      - Users can continue to mark tasks complete or incomplete.
+    - Technical Requirements:
+      - Retain the title and completion fields in the frontend task model.
+      - Preserve the existing title input and completion checkbox behavior in `TaskForm.js` and `TaskList.js`.
+      - Keep task editing and completion updates in the frontend data flow when moving task persistence to local storage.
+  - Story: Require a task title
+    - Acceptance Criteria:
+      - A task cannot be created or saved without a non-empty title.
+    - Technical Requirements:
+      - Retain the required title validation in `TaskForm.js`.
+      - Apply the same validation to both create and edit submissions.
+  - Story: Set an optional due date
+    - Acceptance Criteria:
+      - A task can be saved without a due date.
+      - A provided due date uses the `YYYY-MM-DD` format.
+      - An invalid due date is ignored and treated as absent.
+      - Users can view and change a task's due date when editing it.
+    - Technical Requirements:
+      - Retain the date input and edit-form initialization in `TaskForm.js`; represent dates in the frontend task model as `dueDate` in `YYYY-MM-DD` form.
+      - Validate date values before saving; do not persist invalid values as dates.
+      - Update `TaskList.js` to read the frontend `dueDate` field when displaying a date.
+  - Story: Assign a priority to a task
+    - Acceptance Criteria:
+      - A task can be assigned one of `P1`, `P2`, or `P3`.
+      - Users can view and change a task's priority when editing it.
+    - Technical Requirements:
+      - Add a priority selector to the MUI form in `TaskForm.js`.
+      - Store the selected enum value in the frontend task model.
+  - Story: Default new tasks to P3 priority
+    - Acceptance Criteria:
+      - A newly created task with no explicitly selected priority has priority `P3`.
+    - Technical Requirements:
+      - Initialize the create-form priority to `P3` and apply the same default when creating task records.
+
+- Epic: Task Views
+  - Story: View all tasks
+    - Acceptance Criteria:
+      - The All view displays both completed and incomplete tasks.
+    - Technical Requirements:
+      - Add an All filter control alongside the date filters in the frontend.
+      - Apply the selected view to the task collection rendered by `TaskList.js`.
+  - Story: View tasks due today
+    - Acceptance Criteria:
+      - The Today view displays incomplete tasks whose due date is the current date.
+      - Tasks without a due date or with a different due date are not displayed in this view.
+    - Technical Requirements:
+      - Compare date-only `YYYY-MM-DD` values using the user's local calendar date to avoid UTC date shifts.
+      - Apply the filter in the frontend to the locally stored task collection.
+  - Story: View overdue tasks
+    - Acceptance Criteria:
+      - The Overdue view displays incomplete tasks whose due date is before the current date.
+      - Tasks without a due date or due today or later are not displayed in this view.
+    - Technical Requirements:
+      - Determine the current date in local `YYYY-MM-DD` form and compare it with each valid due date.
+      - Apply the filter in the frontend to the locally stored task collection.
+  - Story: Hide completed tasks from Today and Overdue views
+    - Acceptance Criteria:
+      - Completed tasks are excluded from both Today and Overdue views.
+      - Completed tasks remain visible in the All view.
+    - Technical Requirements:
+      - Include completion status in both date-filter predicates.
+      - Do not change the stored completion state when filtering task views.
+
+- Epic: Local Task Storage
+  - Story: Store tasks locally
+    - Acceptance Criteria:
+      - Task data is stored locally without a backend or external storage.
+      - Created tasks and changes to task details or completion state remain available after reloading the app in the same browser.
+      - Deleting a task removes it from the locally stored task collection.
+    - Technical Requirements:
+      - Replace the frontend task `fetch` calls in `App.js` and `TaskList.js` with a browser `localStorage`-backed task data flow.
+      - Persist and load the task collection, including its existing title/completion fields and the new due date and priority fields.
+      - Leave the Express API and in-memory SQLite implementation in `packages/backend/src/app.js` unchanged; the current API-backed flow does not satisfy the PRD's local-only storage requirement.
+
+# Post-MVP
+
+- Epic: Task Visual Indicators
+  - Story: Highlight overdue tasks
+    - Acceptance Criteria:
+      - Incomplete tasks with a due date before the current date are visually highlighted as overdue.
+      - Tasks that are complete, due today or later, or have no due date are not highlighted as overdue.
+    - Technical Requirements:
+      - Derive overdue status using the same local-date comparison as the Overdue filter.
+      - Apply overdue styling to the task item in `TaskList.js` using the existing MUI component styles.
+  - Story: Display color-coded priority badges
+    - Acceptance Criteria:
+      - Each task displays a priority badge.
+      - `P1` badges are red, `P2` badges are orange, and `P3` badges are gray.
+    - Technical Requirements:
+      - Render a MUI `Chip` or equivalent badge in `TaskList.js` based on the task's priority.
+      - Keep badge labels and colors consistent with the priority enum.
+
+- Epic: Task Sorting
+  - Story: Sort overdue tasks before other tasks
+    - Acceptance Criteria:
+      - In each task view, incomplete overdue tasks appear before tasks that are not overdue.
+    - Technical Requirements:
+      - Calculate overdue status from valid due dates and the local current date before sorting the displayed task collection.
+  - Story: Sort tasks by priority
+    - Acceptance Criteria:
+      - Within overdue and non-overdue groups, tasks are ordered `P1`, then `P2`, then `P3`.
+    - Technical Requirements:
+      - Apply an explicit priority rank (`P1` before `P2` before `P3`) after overdue grouping.
+  - Story: Sort tasks by due date with undated tasks last
+    - Acceptance Criteria:
+      - Within each overdue-status and priority group, dated tasks appear in ascending due-date order.
+      - Tasks without a due date appear after dated tasks in the same group.
+    - Technical Requirements:
+      - Compare valid `YYYY-MM-DD` date strings after overdue and priority ordering; place absent or invalid dates last.
+      - Apply sorting in the frontend to the tasks shown in the selected view. The current backend query sorts by due date and creation time but has no priority ordering; do not rely on that API sort for the required order.
