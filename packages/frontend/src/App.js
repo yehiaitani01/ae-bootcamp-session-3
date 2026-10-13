@@ -3,7 +3,24 @@ import { Alert, CssBaseline, Container, AppBar, Toolbar, Typography, Box } from 
 import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutline';
 import TaskList from './TaskList';
 import TaskForm from './TaskForm';
-import { loadTasks, saveTasks, validatePriority } from './taskStorage';
+import { saveTasks, validatePriority } from './taskStorage';
+import './App.css';
+
+async function requestTask(url, options) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    throw new Error(`Task request failed (${response.status})`);
+  }
+  return response.status === 204 ? null : response.json();
+}
+
+function taskRequest(method, task) {
+  return {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(task),
+  };
+}
 
 function App() {
   const [editingTask, setEditingTask] = useState(null);
@@ -12,51 +29,63 @@ function App() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    try {
-      const storedTasks = loadTasks();
-      saveTasks(storedTasks);
-      setTasks(storedTasks);
+    let active = true;
+    requestTask('/api/tasks').then(serverTasks => {
+      if (!active) return;
+      setTasks(serverTasks);
       setStorageReady(true);
-    } catch (err) {
-      setError(`Failed to load tasks: ${err.message}`);
-    }
+      try {
+        saveTasks(serverTasks);
+      } catch (err) {
+        setError(`Tasks loaded, but local cache failed: ${err.message}`);
+      }
+    }).catch(err => {
+      if (active) setError(`Failed to load tasks: ${err.message}`);
+    });
+    return () => { active = false; };
   }, []);
 
   const persistTasks = (nextTasks) => {
-    saveTasks(nextTasks);
     setTasks(nextTasks);
     setError(null);
-  };
-
-  const handleSave = (task) => {
-    const priority = task.priority === undefined ? 'P3' : task.priority;
-    validatePriority(priority);
-    if (editingTask) {
-      persistTasks(tasks.map(existing => existing.id === editingTask.id
-        ? { ...existing, ...task, priority } : existing));
-      setEditingTask(null);
-    } else {
-      persistTasks([...tasks, {
-        ...task,
-        priority,
-        id: crypto.randomUUID(),
-        completed: false,
-        created_at: new Date().toISOString(),
-      }]);
+    try {
+      saveTasks(nextTasks);
+    } catch (err) {
+      setError(`Task saved to API, but local cache failed: ${err.message}`);
     }
   };
 
-  const handleUpdate = (id, changes) => {
+  const handleSave = async (task) => {
+    const priority = task.priority === undefined ? 'P3' : task.priority;
+    validatePriority(priority);
+    if (editingTask) {
+      const updatedTask = await requestTask(
+        `/api/tasks/${editingTask.id}`, taskRequest('PUT', { ...task, priority })
+      );
+      persistTasks(tasks.map(existing => existing.id === editingTask.id
+        ? updatedTask : existing));
+      setEditingTask(null);
+    } else {
+      const newTask = await requestTask('/api/tasks', taskRequest('POST', { ...task, priority }));
+      persistTasks([...tasks, newTask]);
+    }
+  };
+
+  const handleUpdate = async (id, changes) => {
     try {
-      persistTasks(tasks.map(task => task.id === id ? { ...task, ...changes } : task));
-      if (editingTask?.id === id) setEditingTask(task => ({ ...task, ...changes }));
+      const updatedTask = changes.priority !== undefined
+        ? await requestTask(`/api/tasks/${id}/priority`, taskRequest('PUT', changes))
+        : await requestTask(`/api/tasks/${id}`, taskRequest('PATCH', changes));
+      persistTasks(tasks.map(task => task.id === id ? updatedTask : task));
+      if (editingTask?.id === id) setEditingTask(updatedTask);
     } catch (err) {
       setError(`Failed to update task: ${err.message}`);
     }
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     try {
+      await requestTask(`/api/tasks/${id}`, { method: 'DELETE' });
       persistTasks(tasks.filter(task => task.id !== id));
       if (editingTask?.id === id) setEditingTask(null);
     } catch (err) {

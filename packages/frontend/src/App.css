@@ -18,13 +18,13 @@
   font-size: 1.8rem;
 }
 
-main {
+.App main {
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 
-section {
+.App section {
   background-color: #f5f5f5;
   padding: 20px;
   border-radius: 8px;
@@ -37,14 +37,14 @@ section {
   margin-top: 10px;
 }
 
-input {
+.App input {
   flex: 1;
   padding: 8px;
   border: 1px solid #ddd;
   border-radius: 4px;
 }
 
-button {
+.App button {
   padding: 8px 16px;
   background-color: #61dafb;
   color: #282c34;
@@ -54,16 +54,16 @@ button {
   font-weight: bold;
 }
 
-button:hover {
+.App button:hover {
   background-color: #21a1c9;
 }
 
-ul {
+.App ul {
   list-style-type: none;
   padding: 0;
 }
 
-li {
+.App li {
   padding: 10px;
   border-bottom: 1px solid #ddd;
   text-align: left;
@@ -72,7 +72,7 @@ li {
   align-items: center;
 }
 
-li:last-child {
+.App li:last-child {
   border-bottom: none;
 }
 
@@ -91,4 +91,16 @@ li:last-child {
 .error {
   color: #d32f2f;
   font-weight: bold;
+}
+
+.priority-button.MuiToggleButton-root,
+.priority-button.MuiToggleButton-root:hover {
+  background-color: #7A7A7A;
+  color: #fff;
+}
+
+.priority-button.MuiToggleButton-root.Mui-selected,
+.priority-button.MuiToggleButton-root.Mui-selected:hover {
+  background-color: #07F2E6;
+  color: #212121;
 }

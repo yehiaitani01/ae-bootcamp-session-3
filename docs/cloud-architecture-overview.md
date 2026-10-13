@@ -2,7 +2,7 @@
 
 ## Current System Context
 
-This monorepo contains a React frontend and an Express API backed by an in-memory SQLite store. Following the priority-field story, the frontend stores tasks in browser localStorage and no longer calls the API. The backend remains available independently and unchanged; these diagrams do not prescribe a cloud deployment.
+This monorepo contains a React frontend and an Express API backed by an in-memory SQLite store. The API is the source of truth for tasks; the frontend caches confirmed task records in browser localStorage. These diagrams describe the implementation, not a proposed cloud deployment.
 
 ```mermaid
 flowchart LR
@@ -14,41 +14,48 @@ flowchart LR
         store[("In-memory SQLite<br/>better-sqlite3")]
     end
     user -->|"Create, edit, complete, and delete tasks"| frontend
-    frontend -->|"Save tasks"| local
-    local -->|"Load tasks"| frontend
+    frontend -->|"Cache confirmed tasks"| local
+    frontend -->|"HTTP task CRUD and priority PUT"| api
+    api -->|"JSON task responses"| frontend
     api -->|"SQL reads and writes"| store
     store -->|"Task records"| api
 ```
 
 - **Frontend:** [App.js](../packages/frontend/src/App.js) owns task state and persistence; [TaskForm.js](../packages/frontend/src/TaskForm.js) collects task details; [TaskList.js](../packages/frontend/src/TaskList.js) displays tasks and row-level priority controls.
-- **Browser storage:** [taskStorage.js](../packages/frontend/src/taskStorage.js) loads and saves the task collection under `todo-tasks`, validates priorities, and defaults legacy records without priority to `P3`.
+- **Browser cache:** [taskStorage.js](../packages/frontend/src/taskStorage.js) serializes confirmed tasks under `todo-tasks`. The app loads from the API, not this cache, so stale browser-only IDs are not sent to the backend.
 - **API:** [app.js](../packages/backend/src/app.js) implements task CRUD routes. [index.js](../packages/backend/src/index.js) starts the server on `PORT`, defaulting to `3030`.
-- **Development routing:** The development proxy to `http://localhost:3030` remains configured in [package.json](../packages/frontend/package.json), but the frontend no longer sends task requests.
-- **Backend store:** SQLite runs inside the API process using `new Database(':memory:')`. API task data is lost when that process stops and is separate from browser-local tasks. Existing API tasks are not automatically migrated.
+- **Priority updates:** The frontend uses `PUT /api/tasks/:id/priority` with `{priority}`. The API validates P1/P2/P3, updates only priority, and returns the task. Full edits also accept priority; creation defaults it to P3.
+- **Development routing:** The development proxy forwards API requests to `http://localhost:3030`, as configured in [package.json](../packages/frontend/package.json).
+- **Backend store:** SQLite runs inside the API process using `new Database(':memory:')`. API task data is lost when that process stops. Browser-only tasks from the earlier local-storage implementation are not automatically imported.
 
 ## Creating a TODO
 
-The following sequence shows successful local task creation. The title is required; description and due date are optional. The frontend retains `due_date` and supports `P1`, `P2`, and `P3`, defaulting to `P3`.
+The following sequence shows successful API-backed creation. The title is required; description and due date are optional. Tasks retain `due_date` and support `P1`, `P2`, and `P3`, defaulting to `P3`.
 
 ```mermaid
 sequenceDiagram
     actor User
     participant Form as React TaskForm
     participant App as React App
-    participant Store as Browser localStorage
+    participant API as Express API
+    participant Store as In-memory SQLite
+    participant Cache as Browser localStorage
     participant List as React TaskList
 
     User->>Form: Enter task details and click Add Task
     Form->>Form: Validate non-empty title
     Form->>App: onSave(title, description, due_date, priority)
-    App->>App: Validate priority and assign ID and completion state
-    App->>Store: Serialize updated task collection to todo-tasks
-    Store-->>App: Save succeeds
+    App->>API: POST /api/tasks with task details and priority
+    API->>API: Validate title and priority
+    API->>Store: INSERT task and SELECT new record
+    Store-->>API: Task with assigned ID and completed = 0
+    API-->>App: 201 Created with JSON task
     App->>App: Update React task state
+    App->>Cache: Cache confirmed task collection under todo-tasks
     App-->>Form: Save callback resolves
     Form->>Form: Clear form fields
     App->>List: Pass updated tasks as props
     List-->>User: Display list including the new TODO
 ```
 
-For invalid titles, the form blocks submission. Failed storage writes are surfaced to the user without clearing the form or changing the task list. Corrupt stored collections are reported rather than silently overwritten.
+For invalid titles, the form blocks submission and the API independently rejects invalid requests. Failed API saves are surfaced without clearing unsaved input. Cache failures are reported separately while the UI retains the confirmed backend state; there is no silent offline fallback.

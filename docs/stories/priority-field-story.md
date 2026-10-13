@@ -8,12 +8,16 @@
 ## Technical Requirements
 
 - Extend in-memory task object shape in frontend state to include `priority`.
-- Persist tasks, including `priority`, in browser localStorage under `todo-tasks`.
-- Default new tasks and previously stored tasks without a priority to `P3`.
+- Persist tasks through `/api/tasks` and cache the confirmed task collection,
+  including `priority`, in browser localStorage under `todo-tasks`.
+- Default new tasks without a priority to `P3` in both the form and API.
+- Update row priorities with `PUT /api/tasks/:id/priority`; accept only P1/P2/P3
+  and return the updated task without changing its other fields.
 - Use exclusive P1/P2/P3 controls in the creation/edit form and on each task row.
-- Unselected controls use `#7A7A7A`; the selected control uses `#07F2E6`.
-- Preserve task editing, completion, deletion, and due-date display with local persistence.
-- Surface storage failures without discarding form input or overwriting corrupt stored data.
+- Define unselected `#7A7A7A` and selected `#07F2E6` in `App.css`.
+- Preserve task editing, completion, deletion, and due-date display through the API.
+- Surface API failures without changing the confirmed selection or clearing unsaved input.
+- Report cache failures separately from successful API updates.
 
 ## UI Reference
 
@@ -22,7 +26,8 @@
 ## Implementation Notes
 
 The original story referenced `/api/items` returning `{id,name}`, but this repository
-implements `/api/tasks` instead. Task persistence has moved to browser localStorage
-as requested; no API requests are made by the frontend and the backend is unchanged.
+implements `/api/tasks` instead. The success criteria require API-backed priority updates. The API is now the source
+of truth, with localStorage retained as a cache rather than an offline store.
+Previously browser-only tasks are not automatically imported into the API.
 Task details retain the current `due_date` field. The sketch's selection colors are
 distinct from the deferred red/orange/gray priority badges in the PRD.

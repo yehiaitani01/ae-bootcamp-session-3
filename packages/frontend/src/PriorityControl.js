@@ -19,16 +19,7 @@ function PriorityControl({ value, onChange, label }) {
           key={priority}
           value={priority}
           aria-label={priority}
-          sx={{
-            backgroundColor: '#7A7A7A',
-            color: '#fff',
-            '&:hover': { backgroundColor: '#7A7A7A' },
-            '&.Mui-selected': {
-              backgroundColor: '#07F2E6',
-              color: '#212121',
-              '&:hover': { backgroundColor: '#07F2E6' },
-            },
-          }}
+          className="priority-button"
         >
           {priority}
         </ToggleButton>

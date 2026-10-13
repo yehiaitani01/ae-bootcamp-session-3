@@ -1,184 +1,175 @@
 import React from 'react';
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import App from '../App';
-import { loadTasks, saveTasks, TASKS_STORAGE_KEY } from '../taskStorage';
+import { saveTasks, TASKS_STORAGE_KEY } from '../taskStorage';
 
-const storedTasks = () => JSON.parse(localStorage.getItem(TASKS_STORAGE_KEY));
-const seedTasks = (tasks) => localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(tasks));
-const priorityGroup = (title) => screen.getByRole('group', { name: `Priority for ${title}` });
-const originalCrypto = Object.getOwnPropertyDescriptor(window, 'crypto');
+let tasks;
 const originalFetch = global.fetch;
+const cachedTasks = () => JSON.parse(localStorage.getItem(TASKS_STORAGE_KEY));
+const priorityGroup = (title) => screen.getByRole('group', { name: `Priority for ${title}` });
+const response = (status, body) => ({
+  ok: status >= 200 && status < 300,
+  status,
+  json: async () => body,
+});
 
 beforeEach(() => {
   localStorage.clear();
-  Object.defineProperty(window, 'crypto', {
-    configurable: true,
-    value: { randomUUID: jest.fn(() => 'new-task-id') },
+  tasks = [{
+    id: 1, title: 'Existing task', description: 'Description',
+    due_date: '2026-10-20', priority: 'P3', completed: 0,
+  }];
+  global.fetch = jest.fn(async (url, options = {}) => {
+    const body = options.body ? JSON.parse(options.body) : {};
+    if (!options.method) return response(200, [...tasks]);
+    if (options.method === 'POST') {
+      const task = { ...body, id: 2, completed: 0 };
+      tasks.push(task);
+      return response(201, task);
+    }
+    if (options.method === 'DELETE') {
+      tasks = tasks.filter(task => task.id !== 1);
+      return response(204);
+    }
+    tasks = tasks.map(task => task.id === 1 ? { ...task, ...body } : task);
+    return response(200, tasks[0]);
   });
-  global.fetch = jest.fn();
 });
 
 afterEach(() => {
   jest.restoreAllMocks();
-  if (originalCrypto) Object.defineProperty(window, 'crypto', originalCrypto);
-  else delete window.crypto;
   global.fetch = originalFetch;
 });
 
-describe('TODO App with local priority persistence', () => {
-  test('renders the UI and empty state without requesting the API', () => {
-    render(<App />);
-    expect(screen.getByText('TODO App')).toBeInTheDocument();
-    expect(screen.getByText('No tasks found.')).toBeInTheDocument();
-    expect(global.fetch).not.toHaveBeenCalled();
-  });
+async function renderLoadedApp() {
+  const view = render(<App />);
+  await screen.findByText('Existing task');
+  return view;
+}
 
-  test('creates a task with default P3 and retains it after remount', async () => {
-    const user = userEvent.setup();
-    const { unmount } = render(<App />);
-    await user.type(screen.getByTestId('title-input'), 'New task');
-    await user.type(screen.getByTestId('description-input'), 'Description');
-    await user.click(screen.getByTestId('submit-task'));
-    expect(storedTasks()[0]).toMatchObject({
-      title: 'New task', description: 'Description', priority: 'P3', completed: false,
-    });
-    expect(within(priorityGroup('New task')).getByRole('button', { name: 'P3' }))
-      .toHaveAttribute('aria-pressed', 'true');
-    unmount();
-    render(<App />);
-    expect(screen.getByText('New task')).toBeInTheDocument();
-  });
+test('loads backend tasks and caches their priorities', async () => {
+  await renderLoadedApp();
+  expect(global.fetch).toHaveBeenCalledWith('/api/tasks', undefined);
+  expect(cachedTasks()[0].priority).toBe('P3');
+});
 
-  test.each(['P1', 'P2', 'P3'])('creates a task with explicitly selected %s', async priority => {
-    const user = userEvent.setup();
-    render(<App />);
-    await user.type(screen.getByTestId('title-input'), 'Chosen priority');
-    await user.click(within(screen.getByRole('group', { name: 'Task priority' }))
-      .getByRole('button', { name: priority }));
-    await user.click(screen.getByTestId('submit-task'));
-    expect(storedTasks()[0].priority).toBe(priority);
-    expect(within(screen.getByRole('group', { name: 'Task priority' }))
-      .getByRole('button', { name: 'P3' })).toHaveAttribute('aria-pressed', 'true');
-  });
+test('creates new tasks with default P3 and the backend-assigned ID', async () => {
+  const user = userEvent.setup();
+  await renderLoadedApp();
+  await user.type(screen.getByTestId('title-input'), 'New task');
+  await user.click(screen.getByTestId('submit-task'));
+  await screen.findByText('New task');
+  expect(global.fetch).toHaveBeenCalledWith('/api/tasks', expect.objectContaining({
+    method: 'POST',
+    body: expect.stringContaining('"priority":"P3"'),
+  }));
+  expect(cachedTasks()[1]).toMatchObject({ id: 2, title: 'New task', priority: 'P3' });
+});
 
-  test('row buttons are exclusive, use sketch colors, and persist changes', async () => {
-    seedTasks([{ id: 1, title: 'Existing task', priority: 'P3', completed: true }]);
-    const user = userEvent.setup();
-    render(<App />);
-    const group = priorityGroup('Existing task');
-    const p1 = within(group).getByRole('button', { name: 'P1' });
-    const p3 = within(group).getByRole('button', { name: 'P3' });
-    expect(p1).toHaveStyle({ backgroundColor: '#7A7A7A' });
-    expect(p3).toHaveStyle({ backgroundColor: '#07F2E6' });
-    await user.click(p1);
-    expect(p1).toHaveAttribute('aria-pressed', 'true');
-    expect(p1).toHaveStyle({ backgroundColor: '#07F2E6' });
-    expect(p3).toHaveAttribute('aria-pressed', 'false');
-    expect(p3).toHaveStyle({ backgroundColor: '#7A7A7A' });
-    await user.click(p1);
-    expect(p1).toHaveAttribute('aria-pressed', 'true');
-    expect(storedTasks()[0]).toMatchObject({ priority: 'P1', completed: true });
-  });
+test.each(['P1', 'P2', 'P3'])('creates a task with selected priority %s', async priority => {
+  const user = userEvent.setup();
+  await renderLoadedApp();
+  await user.type(screen.getByTestId('title-input'), 'Chosen priority');
+  await user.click(within(screen.getByRole('group', { name: 'Task priority' }))
+    .getByRole('button', { name: priority }));
+  await user.click(screen.getByTestId('submit-task'));
+  await screen.findByText('Chosen priority');
+  expect(cachedTasks()[1].priority).toBe(priority);
+});
 
-  test('edits details without losing priority or completion', async () => {
-    seedTasks([{
-      id: 1, title: 'Existing task', description: 'Description',
-      due_date: '2026-10-20', priority: 'P2', completed: true,
-    }]);
-    const user = userEvent.setup();
-    render(<App />);
-    await user.click(screen.getByRole('button', { name: 'edit' }));
-    expect(within(screen.getByRole('group', { name: 'Task priority' }))
-      .getByRole('button', { name: 'P2' })).toHaveAttribute('aria-pressed', 'true');
-    await user.clear(screen.getByTestId('title-input'));
-    await user.type(screen.getByTestId('title-input'), 'Edited task');
-    await user.click(screen.getByTestId('submit-task'));
-    expect(storedTasks()[0]).toMatchObject({
-      id: 1, title: 'Edited task', description: 'Description',
-      due_date: '2026-10-20', priority: 'P2', completed: true,
-    });
+test('updates priority using PUT, retains details, and keeps selection exclusive', async () => {
+  const user = userEvent.setup();
+  tasks[0].completed = 1;
+  await renderLoadedApp();
+  const p1 = within(priorityGroup('Existing task')).getByRole('button', { name: 'P1' });
+  await user.click(p1);
+  await waitFor(() => expect(p1).toHaveAttribute('aria-pressed', 'true'));
+  expect(global.fetch).toHaveBeenCalledWith('/api/tasks/1/priority', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ priority: 'P1' }),
   });
+  expect(within(priorityGroup('Existing task')).getByRole('button', { name: 'P3' }))
+    .toHaveAttribute('aria-pressed', 'false');
+  expect(cachedTasks()[0]).toMatchObject({
+    title: 'Existing task', description: 'Description', completed: 1, priority: 'P1',
+  });
+  global.fetch.mockClear();
+  await user.click(p1);
+  expect(p1).toHaveAttribute('aria-pressed', 'true');
+  expect(global.fetch).not.toHaveBeenCalled();
+});
 
-  test('persists completion and deletion', async () => {
-    seedTasks([{ id: 1, title: 'Task', priority: 'P1', completed: false }]);
-    const user = userEvent.setup();
-    render(<App />);
-    await user.click(screen.getByRole('checkbox'));
-    expect(storedTasks()[0]).toMatchObject({ completed: true, priority: 'P1' });
-    await user.click(screen.getByRole('button', { name: 'delete' }));
-    expect(storedTasks()).toEqual([]);
-    expect(screen.getByText('No tasks found.')).toBeInTheDocument();
-  });
+test('shows failed PUT and preserves previously confirmed priority', async () => {
+  const user = userEvent.setup();
+  await renderLoadedApp();
+  global.fetch.mockResolvedValueOnce(response(400, { error: 'Invalid priority' }));
+  await user.click(within(priorityGroup('Existing task')).getByRole('button', { name: 'P1' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Task request failed (400)');
+  expect(cachedTasks()[0].priority).toBe('P3');
+  expect(within(priorityGroup('Existing task')).getByRole('button', { name: 'P3' }))
+    .toHaveAttribute('aria-pressed', 'true');
+});
 
-  test('normalizes legacy tasks without priority to P3', () => {
-    seedTasks([{ id: 1, title: 'Legacy task', completed: 0 }]);
-    render(<App />);
-    expect(storedTasks()[0].priority).toBe('P3');
-  });
+test('uses PUT when editing a task including its priority', async () => {
+  const user = userEvent.setup();
+  await renderLoadedApp();
+  await user.click(screen.getByRole('button', { name: 'edit' }));
+  await user.click(within(screen.getByRole('group', { name: 'Task priority' }))
+    .getByRole('button', { name: 'P2' }));
+  await user.click(screen.getByTestId('submit-task'));
+  await waitFor(() => expect(cachedTasks()[0].priority).toBe('P2'));
+  expect(global.fetch).toHaveBeenCalledWith('/api/tasks/1', expect.objectContaining({
+    method: 'PUT', body: expect.stringContaining('"priority":"P2"'),
+  }));
+});
 
-  test('does not save a whitespace-only title', async () => {
-    const user = userEvent.setup();
-    render(<App />);
-    await user.type(screen.getByTestId('title-input'), '   ');
-    await user.click(screen.getByTestId('submit-task'));
-    expect(screen.getByRole('alert')).toHaveTextContent('Title is required');
-    expect(storedTasks()).toEqual([]);
-  });
+test('preserves completion and deletion through the API', async () => {
+  const user = userEvent.setup();
+  await renderLoadedApp();
+  await user.click(screen.getByRole('checkbox'));
+  await waitFor(() => expect(cachedTasks()[0].completed).toBe(true));
+  expect(global.fetch).toHaveBeenCalledWith('/api/tasks/1', expect.objectContaining({
+    method: 'PATCH',
+  }));
+  await user.click(screen.getByRole('button', { name: 'delete' }));
+  await screen.findByText('No tasks found.');
+  expect(cachedTasks()).toEqual([]);
+});
 
-  test('reports invalid stored priorities without overwriting stored data', () => {
-    const tasks = [{ id: 1, title: 'Invalid task', priority: 'P4' }];
-    seedTasks(tasks);
-    render(<App />);
-    expect(screen.getByRole('alert')).toHaveTextContent('Priority must be P1, P2, or P3');
-    expect(storedTasks()).toEqual(tasks);
-    expect(screen.queryByTestId('submit-task')).not.toBeInTheDocument();
-  });
+test('does not silently load stale local tasks when the API fails', async () => {
+  global.fetch.mockResolvedValueOnce(response(500));
+  render(<App />);
+  expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load tasks');
+  expect(screen.queryByTestId('submit-task')).not.toBeInTheDocument();
+});
 
-  test('reports corrupt local storage without replacing it', () => {
-    localStorage.setItem(TASKS_STORAGE_KEY, 'not JSON');
-    render(<App />);
-    expect(screen.getByRole('alert')).toHaveTextContent('Failed to load tasks');
-    expect(localStorage.getItem(TASKS_STORAGE_KEY)).toBe('not JSON');
-  });
+test('retains form input when task creation fails', async () => {
+  const user = userEvent.setup();
+  await renderLoadedApp();
+  global.fetch.mockRejectedValueOnce(new Error('Network unavailable'));
+  await user.type(screen.getByTestId('title-input'), 'Unsaved task');
+  await user.click(screen.getByTestId('submit-task'));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Failed to save task');
+  expect(screen.getByTestId('title-input')).toHaveValue('Unsaved task');
+  expect(cachedTasks()).toHaveLength(1);
+});
 
-  test('reports failed saves and retains form values for retry', async () => {
-    const user = userEvent.setup();
-    render(<App />);
-    jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('Storage is full');
-    });
-    await user.type(screen.getByTestId('title-input'), 'Unsaved task');
-    await user.click(screen.getByTestId('submit-task'));
-    expect(screen.getByRole('alert')).toHaveTextContent('Failed to save task: Storage is full');
-    expect(screen.getByTestId('title-input')).toHaveValue('Unsaved task');
-    expect(storedTasks()).toEqual([]);
+test('reports cache failure while displaying the confirmed backend update', async () => {
+  const user = userEvent.setup();
+  await renderLoadedApp();
+  jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    throw new Error('Storage is full');
   });
+  await user.click(within(priorityGroup('Existing task')).getByRole('button', { name: 'P1' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('local cache failed: Storage is full');
+  expect(within(priorityGroup('Existing task')).getByRole('button', { name: 'P1' }))
+    .toHaveAttribute('aria-pressed', 'true');
+  expect(tasks[0].priority).toBe('P1');
+});
 
-  test('reports failed row updates and keeps the previously saved priority', async () => {
-    seedTasks([{ id: 1, title: 'Task', priority: 'P3' }]);
-    const user = userEvent.setup();
-    render(<App />);
-    jest.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('Storage is unavailable');
-    });
-    await user.click(within(priorityGroup('Task')).getByRole('button', { name: 'P1' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('Failed to update task');
-    expect(storedTasks()[0].priority).toBe('P3');
-    expect(within(priorityGroup('Task')).getByRole('button', { name: 'P3' }))
-      .toHaveAttribute('aria-pressed', 'true');
-  });
-
-  test.each(['P4', '', null])('rejects invalid priority %s when persisting tasks', priority => {
-    expect(() => saveTasks([{ id: 1, title: 'Task', priority }]))
-      .toThrow('Priority must be P1, P2, or P3');
-    expect(localStorage.getItem(TASKS_STORAGE_KEY)).toBeNull();
-  });
-
-  test('rejects malformed task collections', () => {
-    localStorage.setItem(TASKS_STORAGE_KEY, '{}');
-    expect(loadTasks).toThrow('Stored tasks must be an array');
-    seedTasks([{ id: 1, title: 'Task' }, { id: 1, title: 'Duplicate' }]);
-    expect(loadTasks).toThrow('Stored task data is invalid');
-  });
+test.each(['P4', '', null])('rejects invalid cached priority %s', priority => {
+  expect(() => saveTasks([{ id: 1, title: 'Task', priority }]))
+    .toThrow('Priority must be P1, P2, or P3');
 });
